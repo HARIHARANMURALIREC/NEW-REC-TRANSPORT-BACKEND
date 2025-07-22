@@ -1,10 +1,11 @@
+import os
+import certifi
 from motor.motor_asyncio import AsyncIOMotorClient
 from beanie import init_beanie
 from models import User, Driver, Passenger, Admin, Ride, KilometerEntry, FuelEntry, LeaveRequest, DriverAttendance
 from config import settings
 import asyncio
 import ssl
-import certifi
 
 # MongoDB client
 client: AsyncIOMotorClient = None
@@ -13,19 +14,12 @@ async def init_database():
     """Initialize MongoDB connection and Beanie ODM"""
     global client
     
-    # Create Motor client with your MongoDB Atlas connection string
-    ssl_ctx = ssl.create_default_context()
-    ssl_ctx.options |= ssl.OP_NO_TLSv1 | ssl.OP_NO_TLSv1_1  # Only allow TLSv1.2+
+    # Use environment variable for MongoDB connection string
+    mongodb_url = os.environ.get("MONGODB_URL") or getattr(settings, 'MONGODB_URL', None)
+    if not mongodb_url:
+        raise RuntimeError("MONGODB_URL environment variable not set!")
     client = AsyncIOMotorClient(
-        "mongodb+srv://gpsapp:upB19T8wF8YoDYqj@cluster0.wzwmzbo.mongodb.net/rideshare?retryWrites=true&w=majority&appName=Cluster0",
-        maxPoolSize=10,
-        minPoolSize=1,
-        maxIdleTimeMS=30000,
-        connectTimeoutMS=30000,
-        serverSelectionTimeoutMS=30000,
-        socketTimeoutMS=30000,
-        tls=True,
-        tlsAllowInvalidCertificates=False,
+        mongodb_url,
         tlsCAFile=certifi.where()
     )
     
@@ -44,7 +38,6 @@ async def init_database():
             DriverAttendance
         ]
     )
-    
     print(f"✅ Connected to MongoDB Atlas: rideshare")
 
 async def close_database():
