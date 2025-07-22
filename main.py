@@ -192,9 +192,13 @@ async def get_all_passengers(current_user: User = Depends(get_current_admin)):
     passengers = await Passenger.find_all().to_list()
     user_ids = [p.user_id for p in passengers]
     users = {str(u.id): u async for u in User.find({"_id": {"$in": user_ids}})}
+    response = []
     for p in passengers:
-        p.user = users.get(str(p.user_id))
-    return passengers
+        user = users.get(str(p.user_id))
+        passenger_dict = p.dict()
+        passenger_dict["user"] = user.dict() if user else None
+        response.append(passenger_dict)
+    return response
 
 # Ride management
 @app.post("/rides")
