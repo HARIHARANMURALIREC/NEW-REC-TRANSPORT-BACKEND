@@ -395,6 +395,7 @@ async def create_fuel_entry(fuel_data: dict, current_user: User = Depends(get_cu
         added_by="driver"
     )
     await new_entry.insert()
+    print("[DEBUG] Inserted fuel entry:", new_entry.dict())
     return new_entry
 
 @app.get("/fuel-entries")
@@ -408,6 +409,7 @@ async def get_fuel_entries(
         if driver_id:
             query["driver_id"] = driver_id
         entries = await FuelEntry.find(query).to_list()
+        print(f"[DEBUG] Admin fetched fuel entries: {[e.dict() for e in entries]}")
         # Enrich with driver and user info
         driver_user_ids = list(set([e.driver_id for e in entries]))
         drivers = await Driver.find({"user_id": {"$in": driver_user_ids}}).to_list()
@@ -443,6 +445,7 @@ async def get_fuel_entries(
     # If driver, only allow their own entries
     elif current_user.role == "driver":
         entries = await FuelEntry.find({"driver_id": current_user.id}).to_list()
+        print(f"[DEBUG] Driver {current_user.id} fetched fuel entries: {[e.dict() for e in entries]}")
         return [
             {
                 "id": entry.id,
