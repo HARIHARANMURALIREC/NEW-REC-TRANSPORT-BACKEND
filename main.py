@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status, Security
 from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime, timedelta, date as dt_date
 from typing import Optional, List
@@ -398,43 +398,66 @@ async def create_fuel_entry(fuel_data: dict, current_user: User = Depends(get_cu
     return new_entry
 
 @app.get("/fuel-entries")
-async def get_fuel_entries(driver_id: Optional[str] = None, current_user: User = Depends(get_current_admin)):
-    query = {}
-    if driver_id:
-        query["driver_id"] = driver_id
-    entries = await FuelEntry.find(query).to_list()
-    # Enrich with driver and user info
-    driver_user_ids = list(set([e.driver_id for e in entries]))
-    drivers = await Driver.find({"user_id": {"$in": driver_user_ids}}).to_list()
-    driver_dict = {str(d.user_id): d for d in drivers}
-    user_ids = [d.user_id for d in drivers]
-    users = await User.find({"_id": {"$in": user_ids}}).to_list()
-    user_dict = {str(u.id): u for u in users}
-    response = []
-    for entry in entries:
-        driver = driver_dict.get(str(entry.driver_id))
-        user = user_dict.get(str(entry.driver_id)) if driver else None
-        response.append({
-            "id": entry.id,
-            "driver_id": entry.driver_id,
-            "amount": entry.amount,
-            "cost": entry.cost,
-            "date": entry.date.isoformat() if entry.date else None,
-            "location": entry.location,
-            "added_by": entry.added_by,
-            "admin_id": entry.admin_id,
-            "driver": {
-                "id": driver.id if driver else None,
-                "user_id": driver.user_id if driver else None,
-                "vehicle_make": driver.vehicle_make if driver else None,
-                "vehicle_model": driver.vehicle_model if driver else None,
-                "vehicle_year": driver.vehicle_year if driver else None,
-                "license_plate": driver.license_plate if driver else None,
-                "name": user.name if user else None,
-                "user": {"id": user.id, "name": user.name, "email": user.email} if user else None
-            } if driver and user else None
-        })
-    return response
+async def get_fuel_entries(
+    driver_id: Optional[str] = None,
+    current_user: User = Security(get_current_user)
+):
+    # If admin, allow any query and enrich
+    if current_user.role == "admin":
+        query = {}
+        if driver_id:
+            query["driver_id"] = driver_id
+        entries = await FuelEntry.find(query).to_list()
+        # Enrich with driver and user info
+        driver_user_ids = list(set([e.driver_id for e in entries]))
+        drivers = await Driver.find({"user_id": {"$in": driver_user_ids}}).to_list()
+        driver_dict = {str(d.user_id): d for d in drivers}
+        user_ids = [d.user_id for d in drivers]
+        users = await User.find({"_id": {"$in": user_ids}}).to_list()
+        user_dict = {str(u.id): u for u in users}
+        response = []
+        for entry in entries:
+            driver = driver_dict.get(str(entry.driver_id))
+            user = user_dict.get(str(entry.driver_id)) if driver else None
+            response.append({
+                "id": entry.id,
+                "driver_id": entry.driver_id,
+                "amount": entry.amount,
+                "cost": entry.cost,
+                "date": entry.date.isoformat() if entry.date else None,
+                "location": entry.location,
+                "added_by": entry.added_by,
+                "admin_id": entry.admin_id,
+                "driver": {
+                    "id": driver.id if driver else None,
+                    "user_id": driver.user_id if driver else None,
+                    "vehicle_make": driver.vehicle_make if driver else None,
+                    "vehicle_model": driver.vehicle_model if driver else None,
+                    "vehicle_year": driver.vehicle_year if driver else None,
+                    "license_plate": driver.license_plate if driver else None,
+                    "name": user.name if user else None,
+                    "user": {"id": user.id, "name": user.name, "email": user.email} if user else None
+                } if driver and user else None
+            })
+        return response
+    # If driver, only allow their own entries
+    elif current_user.role == "driver":
+        entries = await FuelEntry.find({"driver_id": current_user.id}).to_list()
+        return [
+            {
+                "id": entry.id,
+                "driver_id": entry.driver_id,
+                "amount": entry.amount,
+                "cost": entry.cost,
+                "date": entry.date.isoformat() if entry.date else None,
+                "location": entry.location,
+                "added_by": entry.added_by,
+                "admin_id": entry.admin_id
+            }
+            for entry in entries
+        ]
+    else:
+        raise HTTPException(status_code=403, detail="Not authorized")
 
 # Add this endpoint to support attendance fetching for admin
 @app.get("/attendance")
