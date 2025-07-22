@@ -190,6 +190,10 @@ async def get_all_drivers(current_user: User = Depends(get_current_admin)):
 async def get_all_passengers(current_user: User = Depends(get_current_admin)):
     """Get all passengers (admin only)"""
     passengers = await Passenger.find_all().to_list()
+    user_ids = [p.user_id for p in passengers]
+    users = {str(u.id): u async for u in User.find({"_id": {"$in": user_ids}})}
+    for p in passengers:
+        p.user = users.get(str(p.user_id))
     return passengers
 
 # Ride management
