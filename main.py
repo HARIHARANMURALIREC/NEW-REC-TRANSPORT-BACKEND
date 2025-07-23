@@ -219,7 +219,7 @@ async def create_ride(ride_data: dict):
 
 @app.get("/rides")
 async def get_rides(passenger_id: Optional[str] = None, driver_id: Optional[str] = None):
-    """Get rides with optional filters and populate driver info"""
+    """Get rides with optional filters and populate driver and passenger info"""
     query = {}
     if passenger_id:
         query["passenger_id"] = passenger_id
@@ -227,16 +227,30 @@ async def get_rides(passenger_id: Optional[str] = None, driver_id: Optional[str]
         query["driver_id"] = driver_id
 
     rides = await Ride.find(query).to_list()
-    # Populate driver info for each ride
+
+    # Collect all driver and passenger IDs
     driver_ids = [ride.driver_id for ride in rides if ride.driver_id]
+    passenger_ids = [ride.passenger_id for ride in rides if ride.passenger_id]
+
+    # Fetch drivers and passengers
     drivers = {d.id: d async for d in Driver.find({"id": {"$in": driver_ids}})}
-    user_ids = [d.user_id for d in drivers.values()]
+    passengers = {p.id: p async for p in Passenger.find({"id": {"$in": passenger_ids}})}
+
+    # Fetch all user IDs
+    user_ids = [d.user_id for d in drivers.values()] + [p.user_id for p in passengers.values()]
     users = {str(u.id): u async for u in User.find({"_id": {"$in": user_ids}})}
+
+    # Attach driver and passenger user info to each ride
     for ride in rides:
         driver = drivers.get(ride.driver_id)
         if driver:
             driver.user = users.get(str(driver.user_id))
             ride.driver = driver
+        passenger = passengers.get(ride.passenger_id)
+        if passenger:
+            passenger.user = users.get(str(passenger.user_id))
+            ride.passenger = passenger
+
     return rides
 
 @app.get("/rides/pending")
