@@ -2,7 +2,7 @@ import os
 import certifi
 from motor.motor_asyncio import AsyncIOMotorClient
 from beanie import init_beanie
-from models import User, Driver, Passenger, Admin, Ride, KilometerEntry, FuelEntry, LeaveRequest, DriverAttendance
+from models import User, Driver, Passenger, Admin, Ride, KilometerEntry, FuelEntry, LeaveRequest, DriverAttendance, Vehicle
 from config import settings
 import asyncio
 import ssl
@@ -35,7 +35,8 @@ async def init_database():
             KilometerEntry,
             FuelEntry,
             LeaveRequest,
-            DriverAttendance
+            DriverAttendance,
+            Vehicle
         ]
     )
     print(f"✅ Connected to MongoDB Atlas: rideshare")
