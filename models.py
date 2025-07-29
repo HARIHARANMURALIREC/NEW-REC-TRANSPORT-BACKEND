@@ -231,6 +231,31 @@ class DriverAttendance(Document):
             "status"
         ]
 
+class Vehicle(Document):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()), primary_key=True)
+    vehicle_make: str
+    vehicle_model: str
+    vehicle_year: int
+    license_plate: str
+    vehicle_color: str
+    license_number: str
+    license_expiry: datetime
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+    class Settings:
+        name = "vehicles"
+        indexes = [
+            "vehicle_make",
+            "vehicle_model",
+            "vehicle_year",
+            "license_plate",
+            "license_number",
+            "license_expiry",
+            "created_at",
+            "updated_at"
+        ]
+
 # Pydantic models for API responses
 class UserResponse(BaseModel):
     id: str
