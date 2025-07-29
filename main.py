@@ -6,15 +6,7 @@ import uuid
 import json
 
 from database import init_database, create_default_users, close_database
-from fastapi import FastAPI, Depends, HTTPException, status
-from fastapi.middleware.cors import CORSMiddleware
-from datetime import datetime, timedelta
-from typing import Optional, List
-import uuid
-import json
-
-from database import init_database, create_default_users, close_database
-from models import User, Driver, Passenger, Admin, Ride, KilometerEntry, FuelEntry, LeaveRequest, DriverAttendance, RideStatus, LeaveRequestStatus
+from models import User, Driver, Passenger, Admin, Ride, KilometerEntry, FuelEntry, LeaveRequest, DriverAttendance, RideStatus, LeaveRequestStatus, Vehicle
 from config import settings
 from auth import get_password_hash, verify_password, create_access_token, get_current_user, get_current_admin, get_current_driver
 
@@ -128,14 +120,9 @@ async def create_driver(driver_data: dict, current_user: User = Depends(get_curr
     )
     await new_user.insert()
     
-    # Create driver profile
+    # Create driver profile (without vehicle info)
     driver_profile = await Driver.create_driver(
         user_id=new_user.id,
-        vehicle_make=driver_data.get("vehicle_make"),
-        vehicle_model=driver_data.get("vehicle_model"),
-        vehicle_year=driver_data.get("vehicle_year"),
-        license_plate=driver_data.get("license_plate"),
-        vehicle_color=driver_data.get("vehicle_color"),
         license_number=driver_data.get("license_number"),
         license_expiry=driver_data.get("license_expiry"),
         rating=driver_data.get("rating", 5.0),
@@ -185,6 +172,8 @@ async def get_all_drivers(current_user: User = Depends(get_current_admin)):
         driver.user = users.get(str(driver.user_id))
     return drivers
 
+
+
 # Get all passengers
 @app.get("/passengers")
 async def get_all_passengers(current_user: User = Depends(get_current_admin)):
@@ -199,6 +188,87 @@ async def get_all_passengers(current_user: User = Depends(get_current_admin)):
         passenger_dict["user"] = user.dict() if user else None
         response.append(passenger_dict)
     return response
+
+@app.post("/vehicles")
+async def create_vehicle(vehicle_data: dict, current_user: User = Depends(get_current_admin)):
+    """Create a new vehicle (admin only, not attached to a driver)"""
+    print(f"🚗 Creating vehicle with data: {vehicle_data}")
+    
+    # Validate required fields
+    required_fields = [
+        "vehicle_make", "vehicle_model", "vehicle_year", "license_plate",
+        "vehicle_color", "license_number", "license_expiry"
+    ]
+    for field in required_fields:
+        if not vehicle_data.get(field):
+            print(f"❌ Missing required field: {field}")
+            raise HTTPException(status_code=400, detail=f"Missing required field: {field}")
+    
+    # Parse license_expiry to datetime
+    license_expiry = vehicle_data["license_expiry"]
+    if isinstance(license_expiry, str):
+        try:
+            license_expiry = datetime.strptime(license_expiry, "%d-%m-%Y")
+            print(f"✅ Parsed license_expiry: {license_expiry}")
+        except Exception as e:
+            print(f"❌ Error parsing license_expiry: {e}")
+            raise HTTPException(status_code=400, detail="license_expiry must be in DD-MM-YYYY format")
+    
+    try:
+        vehicle = Vehicle(
+            vehicle_make=vehicle_data["vehicle_make"],
+            vehicle_model=vehicle_data["vehicle_model"],
+            vehicle_year=int(vehicle_data["vehicle_year"]),
+            license_plate=vehicle_data["license_plate"],
+            vehicle_color=vehicle_data["vehicle_color"],
+            license_number=vehicle_data["license_number"],
+            license_expiry=license_expiry
+        )
+        await vehicle.insert()
+        print(f"✅ Vehicle created successfully with ID: {vehicle.id}")
+        return vehicle
+    except Exception as e:
+        print(f"❌ Error creating vehicle: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to create vehicle: {str(e)}")
+
+@app.get("/vehicles")
+async def get_all_vehicles(current_user: User = Depends(get_current_admin)):
+    """Get all vehicles (admin only) - includes both direct vehicles and driver vehicles"""
+    # Vehicles created directly
+    vehicles = await Vehicle.find_all().to_list()
+    vehicle_list = [
+        {
+            "id": v.id,
+            "vehicle_make": v.vehicle_make,
+            "vehicle_model": v.vehicle_model,
+            "vehicle_year": v.vehicle_year,
+            "license_plate": v.license_plate,
+            "vehicle_color": v.vehicle_color,
+            "license_number": v.license_number,
+            "license_expiry": v.license_expiry.isoformat() if v.license_expiry else None,
+            "created_at": v.created_at.isoformat() if v.created_at else None,
+            "updated_at": v.updated_at.isoformat() if v.updated_at else None
+        }
+        for v in vehicles
+    ]
+    # Vehicles attached to drivers
+    drivers = await Driver.find_all().to_list()
+    for driver in drivers:
+        if (driver.vehicle_make and driver.vehicle_model and 
+            driver.license_plate and driver.vehicle_color):
+            vehicle_list.append({
+                "id": str(driver.id),
+                "vehicle_make": driver.vehicle_make,
+                "vehicle_model": driver.vehicle_model,
+                "vehicle_year": driver.vehicle_year,
+                "license_plate": driver.license_plate,
+                "vehicle_color": driver.vehicle_color,
+                "license_number": driver.license_number,
+                "license_expiry": driver.license_expiry.isoformat() if driver.license_expiry else None,
+                "created_at": driver.created_at.isoformat() if hasattr(driver, 'created_at') and driver.created_at else None,
+                "updated_at": driver.updated_at.isoformat() if hasattr(driver, 'updated_at') and driver.updated_at else None
+            })
+    return vehicle_list
 
 # Ride management
 @app.post("/rides")
@@ -263,6 +333,24 @@ async def get_pending_rides(current_user: User = Depends(get_current_admin)):
 async def get_assigned_rides(current_user: User = Depends(get_current_driver)):
     """Get rides assigned to current driver"""
     rides = await Ride.find({"driver_id": current_user.id, "status": {"$in": [RideStatus.ASSIGNED, RideStatus.IN_PROGRESS]}}).to_list()
+    
+    # Collect all passenger IDs
+    passenger_ids = [ride.passenger_id for ride in rides if ride.passenger_id]
+    
+    # Fetch passengers
+    passengers = {p.id: p async for p in Passenger.find({"id": {"$in": passenger_ids}})}
+    
+    # Fetch all user IDs for passengers
+    user_ids = [p.user_id for p in passengers.values()]
+    users = {str(u.id): u async for u in User.find({"_id": {"$in": user_ids}})}
+    
+    # Attach passenger user info to each ride
+    for ride in rides:
+        passenger = passengers.get(ride.passenger_id)
+        if passenger:
+            passenger.user = users.get(str(passenger.user_id))
+            ride.passenger = passenger
+    
     return rides
 
 @app.post("/rides/{ride_id}/assign")
