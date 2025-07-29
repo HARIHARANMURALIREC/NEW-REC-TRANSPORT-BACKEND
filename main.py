@@ -9,9 +9,20 @@ from database import init_database, create_default_users, close_database
 from models import User, Driver, Passenger, Admin, Ride, KilometerEntry, FuelEntry, LeaveRequest, DriverAttendance, RideStatus, LeaveRequestStatus, Vehicle
 from config import settings
 from auth import get_password_hash, verify_password, create_access_token, get_current_user, get_current_admin, get_current_driver
+from contextlib import asynccontextmanager
 
-# Create FastAPI app
-app = FastAPI(title="RideShare API", version="1.0.0")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    await init_database()
+    await create_default_users()
+    print("✅ MongoDB Atlas connected and ready!")
+    yield
+    # Shutdown
+    await close_database()
+
+# Create FastAPI app with lifespan
+app = FastAPI(title="RideShare API", version="1.0.0", lifespan=lifespan)
 
 # Add CORS middleware
 app.add_middleware(
@@ -21,18 +32,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Startup event
-@app.on_event("startup")
-async def startup_event():
-    await init_database()
-    await create_default_users()
-    print("✅ MongoDB Atlas connected and ready!")
-
-# Shutdown event
-@app.on_event("shutdown")
-async def shutdown_event():
-    await close_database()
 
 # Test endpoint
 @app.get("/test")
@@ -705,3 +704,8 @@ async def get_my_driver_profile(current_user: User = Depends(get_current_driver)
 async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "database": "MongoDB Atlas", "timestamp": datetime.utcnow()}
+
+# Run the server
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
